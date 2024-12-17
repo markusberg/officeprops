@@ -1,20 +1,12 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 
-const OP = require('./../officeprops');
+import * as OP from '../src/index.js';
+import { readFile } from 'node:fs/promises';
+import { it, expect } from 'vitest';
 
-const fs = require('fs');
-
-var filesPath = './src/test/files/';
-
-const readFile = (path, opts) =>
-  new Promise((res, rej) => {
-    fs.readFile(path, opts, (err, data) => {
-      if (err) rej(err);
-      else res(data);
-    });
-  });
+const filesPath = './src/test/';
 
 it('Should parse metadata correctly', async () => {
   expect.assertions(4);

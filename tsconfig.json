@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "ES2022",
+    "sourceMap": true,
+    "lib": ["ES2022", "DOM"],
+
+    "strict": false,
+    "declaration": true,
+    "incremental": true,
+
+    "preserveConstEnums": true,
+
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "baseUrl": "./"
+  },
+  "include": ["./src/**/*.ts"]
+}
