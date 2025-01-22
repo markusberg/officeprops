@@ -163,7 +163,7 @@ it('Should throw error on invalid file', async () => {
   try {
     await OP.getData(file);
   } catch (err) {
-    expect(err.message).toBe('Error: File not valid');
+    expect((err as any).message).toBe('Error: File not valid');
   }
 });
 

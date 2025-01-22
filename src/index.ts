@@ -1,51 +1,72 @@
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from 'xmldom';
+import { parse } from 'tinyduration';
 
-const typeConverters = {
-  str: (e) => e,
-  int: (e) => e,
-  float: (e) => e,
-  Date: (e) => new Date(e).toString(),
-  enumDocSecurity: (e) =>
-    e == 0
-      ? 'None'
-      : e == 1
-        ? 'Document is password protected.'
-        : e == 2
-          ? 'Document is recommended to be opened as read-only.'
-          : e == 4
-            ? 'Document is enforced to be opened as read-only.'
-            : e == 8
-              ? 'Document is locked for annotation.'
-              : 'Unknown', //default
-  bool: (e) => (e == 'false' ? 'No' : e == 'true' ? 'Yes' : 'Unknown'),
-  ISO8601: (e) => (
-    (e = /^P((\d+Y)?(\d+M)?(\d+W)?(\d+D)?)?(T(\d+H)?(\d+M)?(\d+S)?)?$/
-      .exec(e)
-      .map((t) =>
-        Number(
-          typeof t === 'undefined'
-            ? 0
-            : ((t = t.replace(/[^\d]/g, '')), t == '' ? 0 : t),
-        ),
-      )),
-    (e = Math.floor(
-      (e[2] * 31104000 +
-        e[3] * 2592000 +
-        e[4] * 604800 +
-        e[5] * 246060 +
-        e[7] * 3600 +
-        e[8] * 60 +
-        e[9]) /
-        60,
-    )),
-    e == 1 ? e + ' minute' : e + ' minutes'
-  ),
-  intMinutes: (e) => (e == 1 ? e + ' minute' : e + ' minutes'),
+type MetaObject = { path: string; value: string };
+type HeadingPair = { name: string; length: number; value: string[] };
+
+type Prop = {
+  value: string;
+  tvalue: any;
+  xmlPath: string;
+};
+
+type Editable = Record<string, { value: string; tvalue: any; xmlPath: string }>;
+type Readonly = Record<string, { value: string[]; tvalue: string[] }>;
+
+type DOC_SECURITY_TYPE = '0' | '1' | '2' | '4' | '8';
+const DOC_SECURITY: Record<DOC_SECURITY_TYPE, string> = {
+  '0': 'None',
+  '1': 'Document is password protected.',
+  '2': 'Document is recommended to be opened as read-only.',
+  '4': 'Document is enforced to be opened as read-only.',
+  '8': 'Document is locked for annotation.',
+};
+
+function pluralizeMinute(num: number): string {
+  return `${num.toString()} minute` + (num === 1 ? '' : 's');
+}
+
+type PROP_TYPE =
+  | 'str'
+  | 'int'
+  | 'float'
+  | 'Date'
+  | 'enumDocSecurity'
+  | 'bool'
+  | 'ISO8601'
+  | 'intMinutes';
+
+const typeConverters: Record<PROP_TYPE, Function> = {
+  str: (e: string) => e,
+  int: (e: string) => e,
+  float: (e: string) => e,
+  Date: (e: string) => new Date(e).toString(),
+  enumDocSecurity: (e: DOC_SECURITY_TYPE) => DOC_SECURITY[e] || 'Unknown',
+  bool: (e: 'false' | 'true' | unknown) =>
+    e === 'false' ? 'No' : e === 'true' ? 'Yes' : 'Unknown',
+  ISO8601: (e: string) => {
+    try {
+      const duration = parse(e);
+
+      const minutes =
+        (duration.years || 0) * 525600 +
+        (duration.months || 0) * 43200 +
+        (duration.weeks || 0) * 10080 +
+        (duration.days || 0) * 1440 +
+        (duration.hours || 0) * 60 +
+        (duration.minutes || 0) +
+        Math.floor((duration.seconds || 0) / 60);
+      return pluralizeMinute(minutes);
+    } catch (err) {
+      return '';
+    }
+  },
+  intMinutes: (e: string) => pluralizeMinute(parseInt(e)),
 };
 
 //https://msdn.microsoft.com/en-us/library/documentformat.openxml.extendedproperties(v=office.14).aspx
-const properties = {
+const PROPERTIES: Record<string, { name: string; type: PROP_TYPE }> = {
   'cp:category': { name: 'category', type: 'str' },
   Manager: { name: 'manager', type: 'str' },
   'cp:contentStatus': { name: 'contentStatus', type: 'str' },
@@ -137,32 +158,7 @@ const properties = {
   'office:meta/meta:generator': { name: 'application', type: 'str' },
 };
 
-export const mimeTypes: Record<string, string> = {
-  //https://stackoverflow.com/questions/4212861/what-is-a-correct-mime-type-for-docx-pptx-etc
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  dotx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
-  docm: 'application/vnd.ms-word.document.macroEnabled.12',
-  dotm: 'application/vnd.ms-word.template.macroEnabled.12',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
-  xlsb: 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  ppsx: 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
-  ppsm: 'application/vnd.ms-powerpoint.slideshow.macroEnabled.12',
-  pptm: 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
-  xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
-  xltm: 'application/vnd.ms-excel.template.macroEnabled.12',
-  potx: 'application/vnd.openxmlformats-officedocument.presentationml.template',
-  potm: 'application/vnd.ms-powerpoint.template.macroEnabled.12',
-  odt: 'application/vnd.oasis.opendocument.text',
-  odp: 'application/vnd.oasis.opendocument.presentation',
-  ods: 'application/vnd.oasis.opendocument.spreadsheet',
-  ots: 'application/vnd.oasis.opendocument.spreadsheet-template',
-  otp: 'application/vnd.oasis.opendocument.presentation-template',
-  ott: 'application/vnd.oasis.opendocument.text-template',
-};
-
-async function getMetadataAsXML(zip: JSZip) {
+async function getMetadataAsXML(zip: JSZip): Promise<Document[]> {
   const OPformat = getFormat(zip);
   if (OPformat === 'office') {
     return [
@@ -172,11 +168,15 @@ async function getMetadataAsXML(zip: JSZip) {
   } else if (OPformat === 'openoffice') {
     return [await getXmlFromZip(zip, 'meta.xml')];
   }
-  return null;
+  return [];
 }
 
 async function getXmlFromZip(zip: JSZip, fileName: string): Promise<Document> {
-  const text = await zip.file(fileName).async('text');
+  const zipfile = zip.file(fileName);
+  if (!zipfile) {
+    throw new Error('Error: File not found');
+  }
+  const text = await zipfile.async('text');
   const xmlDoc = new DOMParser().parseFromString(text, 'text/xml');
   return xmlDoc;
 }
@@ -203,102 +203,99 @@ function getFormat(zip: JSZip): 'office' | 'openoffice' | null {
   return null;
 }
 
-function translateMetadata(
-  textObjects: any,
-  names: any,
-): { editable: any; readOnly: any } {
-  let headingPairsAndParts: any[] = [];
-  textObjects.forEach((e: any, i: number, a: any[]) => {
-    if (e.path == 'HeadingPairs/vt:vector/vt:variant/vt:lpstr') {
-      headingPairsAndParts.push({
-        name: Object.prototype.hasOwnProperty.call(names, e.value)
-          ? names[e.value].name
-          : e.value.replace(/ /g, ''),
-        length: a[i + 1].value,
-        value: [],
-      });
+function createPropertyOrArray(object: any, property: string, val: Prop) {
+  if (object.hasOwnProperty(property)) {
+    if (Array.isArray(object[property].value)) {
+      object[property].value.push(val.value);
+      // FIXME: is this a typo? should it be tvalue?
+      object[property].rvalue.push(val.tvalue);
+    } else {
+      object[property].value = [object[property].value, val.value];
+      object[property].tvalue = [object[property].tvalue, val.tvalue];
     }
-    if (e.path == 'TitlesOfParts/vt:vector/vt:lpstr') {
-      for (var i = 0; i < headingPairsAndParts.length; i++) {
-        if (
-          headingPairsAndParts[i]['value'].length <
-          headingPairsAndParts[i]['length']
-        ) {
-          headingPairsAndParts[i]['value'].push(e.value);
+  } else {
+    object[property] = val;
+  }
+}
+
+function translateMetadata(textObjects: MetaObject[]): {
+  editable: Editable;
+  readOnly: Readonly;
+} {
+  const headingPairsAndParts: HeadingPair[] = [];
+  textObjects.map((element: MetaObject, idx: number, arr: MetaObject[]) => {
+    if (element.path === 'HeadingPairs/vt:vector/vt:variant/vt:lpstr') {
+      const name = !!PROPERTIES[element.value]
+        ? PROPERTIES[element.value].name
+        : element.value.replace(/ /g, '');
+      const length = parseInt(arr[idx + 1].value);
+      headingPairsAndParts.push({ name, length, value: [] });
+    } else if (element.path === 'TitlesOfParts/vt:vector/vt:lpstr') {
+      for (const pair of headingPairsAndParts) {
+        if (pair.value.length < pair.length) {
+          pair.value.push(element.value);
           break;
         }
       }
     }
   });
 
-  textObjects = textObjects.filter(
+  const filteredTextObjects = textObjects.filter(
     (e) =>
-      e.path != 'HeadingPairs/vt:vector/vt:variant/vt:lpstr' &&
-      e.path != 'TitlesOfParts/vt:vector/vt:lpstr' &&
-      e.path != 'HeadingPairs/vt:vector/vt:variant/vt:i4',
+      e.path !== 'HeadingPairs/vt:vector/vt:variant/vt:lpstr' &&
+      e.path !== 'TitlesOfParts/vt:vector/vt:lpstr' &&
+      e.path !== 'HeadingPairs/vt:vector/vt:variant/vt:i4',
   );
 
-  var createPropertyOrArray = (object: any, property: any, val: any) => {
-    if (object.hasOwnProperty(property)) {
-      if (object[property].value instanceof Array) {
-        object[property].value.push(val.value);
-        object[property].rvalue.push(val.tvalue);
-      } else {
-        object[property].tvalue = [object[property].tvalue, val.tvalue];
-        object[property].value = [object[property].value, val.value];
-      }
-    } else {
-      object[property] = val;
-    }
-  };
-
-  const editable = {};
-  textObjects.forEach((e) => {
-    if (names.hasOwnProperty(e['path'])) {
-      const tvalue = typeConverters[names[e['path']].type](e.value);
-      createPropertyOrArray(editable, names[e['path']].name, {
-        value: e.value,
+  const editable: Editable = {};
+  for (const element of filteredTextObjects) {
+    const prop = PROPERTIES[element.path];
+    if (prop) {
+      // known, defined property
+      const tvalue = typeConverters[prop.type](element.value);
+      createPropertyOrArray(editable, prop.name, {
+        value: element.value,
         tvalue,
-        xmlPath: e.path,
+        xmlPath: element.path,
       });
     } else {
-      createPropertyOrArray(editable, e['path'], {
-        value: e.value,
-        tvalue: e.value,
-        xmlPath: e.path,
+      createPropertyOrArray(editable, element.path, {
+        value: element.value,
+        tvalue: element.value,
+        xmlPath: element.path,
       });
     }
-  });
+  }
 
-  const readOnly = {};
-  headingPairsAndParts.forEach((e) => {
+  const readOnly: Readonly = {};
+  for (const e of headingPairsAndParts) {
     readOnly[e.name] = { value: e.value, tvalue: e.value };
-  });
+  }
 
   return { editable, readOnly };
 }
 
-function getTextObjectsFromXML(xml: Document) {
+function getTextObjectsFromXML(xml: Document): MetaObject[] {
+  if (!xml.lastChild) {
+    return [];
+  }
   return getTextFromNodelist(xml.lastChild.childNodes);
 }
 
 //returns all textnodes as object{path:'',value:''} from node list
 function getTextFromNodelist(
   nodes: NodeListOf<ChildNode>,
-  name?: string,
-  metaObjects?: any[],
-) {
-  if (typeof metaObjects === 'undefined') {
-    metaObjects = [];
-  }
-  if (typeof name === 'undefined') {
-    name = '';
-  }
+  name: string = '',
+  metaObjects: MetaObject[] = [],
+): MetaObject[] {
   Array.from(nodes).forEach(function (e) {
-    if (e.childNodes.length == 1 && e.firstChild.nodeType === 3) {
-      var metaObject = {
+    if (
+      e.childNodes.length === 1 &&
+      e.firstChild?.nodeType === Node.TEXT_NODE
+    ) {
+      const metaObject = {
         path: (name + '/' + e.nodeName).slice(1),
-        value: e.firstChild.textContent,
+        value: e.firstChild.textContent!,
       };
       metaObjects.push(metaObject);
     } else if (e.childNodes.length > 0) {
@@ -313,7 +310,7 @@ function getTextFromNodelist(
         value: '',
       };
       if (
-        metaObject.path == 'office:meta/meta:document-statistic' ||
+        metaObject.path === 'office:meta/meta:document-statistic' ||
         metaObject.path === 'office:meta/meta:template'
       ) {
         Array.from((e as any).attributes).forEach((attr: any) => {
@@ -330,20 +327,21 @@ function getTextFromNodelist(
   return metaObjects;
 }
 
-function editXML(xml: any, metadata: any) {
+function editXML(xml: Document, metadata: any): Document {
   for (const key in metadata.editable) {
     const object = metadata.editable[key];
     if (object.xmlPath.includes('/@')) {
-      var nodes = xml.getElementsByTagName(
-        object.xmlPath.split('/').slice(-2, -1),
-      );
-      for (var i = 0; i < nodes.length; i++) {
+      const tag = object.xmlPath.split('/').slice(-2, -1);
+      const nodes = xml.getElementsByTagName(tag);
+      for (let i = 0; i < nodes.length; i++) {
         nodes[i].getAttributeNode(
           object.xmlPath.split('/').slice(-1)[0].replace('@', ''),
         ).value = object.value;
       }
     } else {
-      var nodes = xml.getElementsByTagName(object.xmlPath.split('/').slice(-1));
+      const nodes = xml.getElementsByTagName(
+        object.xmlPath.split('/').slice(-1),
+      );
       if (nodes.length > 0 && object.xmlPath != '') {
         for (var i = 0; i < nodes.length; i++) {
           var valueToInsert =
@@ -370,7 +368,7 @@ function editXML(xml: any, metadata: any) {
 async function getModifiedMetadataAsXml(
   officeFile: Buffer<ArrayBufferLike>,
   metadata: any,
-) {
+): Promise<Document[]> {
   const zip = await loadFile(officeFile);
   const xmls = await getMetadataAsXML(zip);
   return xmls.map((e) => editXML(e, metadata));
@@ -435,11 +433,6 @@ export async function removeData(officeFile: Buffer<ArrayBufferLike>) {
 export async function getData(officeFile: Buffer<ArrayBufferLike>) {
   const zip = await loadFile(officeFile);
   const files = await getMetadataAsXML(zip);
-  return translateMetadata(
-    [].concat.apply(
-      [],
-      files.map((file) => getTextObjectsFromXML(file)),
-    ),
-    properties,
-  );
+  const payload = files.flatMap((file) => getTextObjectsFromXML(file));
+  return translateMetadata(payload);
 }

@@ -17,8 +17,10 @@
   "main": "src/officeprops.js",
   "license": "MIT",
   "dependencies": {
-    "xmldom": "^0.6.0",
-    "jszip": "3.10.1"
+    "jsdom": "^26.0.0",
+    "jszip": "^3.10.1",
+    "tinyduration": "^3.3.1",
+    "xmldom": "^0.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
